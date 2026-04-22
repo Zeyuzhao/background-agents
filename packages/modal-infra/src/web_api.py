@@ -185,7 +185,32 @@ async def api_create_sandbox(
             settings=request.get("sandbox_settings") or None,
         )
 
+        log.info(
+            "api.create_sandbox.start",
+            repo_owner=config.repo_owner,
+            repo_name=config.repo_name,
+            session_id=request.get("session_id"),
+            sandbox_id=config.sandbox_id,
+            has_snapshot=bool(config.snapshot_id),
+            has_repo_image=bool(config.repo_image_id),
+            code_server_enabled=config.code_server_enabled,
+            trace_id=x_trace_id,
+            request_id=x_request_id,
+        )
+
         handle = await manager.create_sandbox(config)
+
+        log.info(
+            "api.create_sandbox.success",
+            repo_owner=config.repo_owner,
+            repo_name=config.repo_name,
+            session_id=request.get("session_id"),
+            sandbox_id=handle.sandbox_id,
+            modal_object_id=handle.modal_object_id,
+            status=handle.status.value,
+            trace_id=x_trace_id,
+            request_id=x_request_id,
+        )
 
         return {
             "success": True,
@@ -203,7 +228,17 @@ async def api_create_sandbox(
     except Exception as e:
         outcome = "error"
         http_status = 500
-        log.error("api.error", exc=e, endpoint_name="api_create_sandbox")
+        log.error(
+            "api.error",
+            exc=e,
+            endpoint_name="api_create_sandbox",
+            session_id=request.get("session_id"),
+            sandbox_id=request.get("sandbox_id"),
+            repo_owner=request.get("repo_owner"),
+            repo_name=request.get("repo_name"),
+            trace_id=x_trace_id,
+            request_id=x_request_id,
+        )
         return {"success": False, "error": str(e)}
     finally:
         duration_ms = int((time.time() - start_time) * 1000)

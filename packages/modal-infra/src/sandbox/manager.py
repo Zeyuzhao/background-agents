@@ -287,6 +287,17 @@ class SandboxManager:
         else:
             image = base_image
 
+        log.info(
+            "sandbox.create.start",
+            sandbox_id=sandbox_id,
+            repo_owner=config.repo_owner,
+            repo_name=config.repo_name,
+            has_snapshot=bool(config.snapshot_id),
+            has_repo_image=bool(config.repo_image_id),
+            code_server_enabled=config.code_server_enabled,
+            terminal_enabled=terminal_enabled,
+        )
+
         # Create the sandbox
         # The entrypoint command is passed as positional args
         create_kwargs: dict = {
@@ -303,16 +314,38 @@ class SandboxManager:
         if exposed_ports:
             create_kwargs["encrypted_ports"] = exposed_ports
 
+        create_start = time.time()
         sandbox = await modal.Sandbox.create.aio(
             "python",
             "-m",
             "sandbox_runtime.entrypoint",  # Run the supervisor entrypoint
             **create_kwargs,
         )
+        create_duration_ms = int((time.time() - create_start) * 1000)
 
         modal_object_id = sandbox.object_id
+        log.info(
+            "sandbox.create.modal_ready",
+            sandbox_id=sandbox_id,
+            modal_object_id=modal_object_id,
+            repo_owner=config.repo_owner,
+            repo_name=config.repo_name,
+            duration_ms=create_duration_ms,
+        )
+
+        tunnel_start = time.time()
         code_server_url, ttyd_url, extra_tunnel_urls = await self._resolve_and_setup_tunnels(
             sandbox, sandbox_id, config.code_server_enabled, terminal_enabled, tunnel_ports
+        )
+        tunnel_duration_ms = int((time.time() - tunnel_start) * 1000)
+        log.info(
+            "sandbox.create.tunnels_ready",
+            sandbox_id=sandbox_id,
+            modal_object_id=modal_object_id,
+            code_server_url=bool(code_server_url),
+            ttyd_url=bool(ttyd_url),
+            tunnel_count=len(extra_tunnel_urls or {}),
+            duration_ms=tunnel_duration_ms,
         )
 
         duration_ms = int((time.time() - start_time) * 1000)
