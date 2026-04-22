@@ -33,7 +33,7 @@ import {
   type HeartbeatConfig,
   type ConnectingTimeoutConfig,
 } from "./decisions";
-import { extractProviderAndModel } from "../../utils/models";
+import { extractProviderAndModel, getValidModelOrDefault } from "../../utils/models";
 import { createLogger, type Logger } from "../../logger";
 import { hashToken } from "../../auth/crypto";
 import { mintJwt } from "../../auth/jwt";
@@ -1104,7 +1104,7 @@ export class SandboxLifecycleManager {
    * e.g., "openai/gpt-5.2-codex" -> { provider: "openai", model: "gpt-5.2-codex" }
    */
   private resolveProviderAndModel(session: SessionRow): { provider: string; model: string } {
-    return extractProviderAndModel(session.model || this.config.model);
+    return extractProviderAndModel(getValidModelOrDefault(session.model || this.config.model));
   }
 
   /**

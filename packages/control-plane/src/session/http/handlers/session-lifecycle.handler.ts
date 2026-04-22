@@ -161,6 +161,8 @@ export function createSessionLifecycleHandler(
       }
 
       const sandbox = deps.getSandbox();
+      const model = getValidModelOrDefault(session.model);
+      const reasoningEffort = deps.validateReasoningEffort(model, session.reasoning_effort ?? undefined);
 
       return Response.json({
         id: deps.getPublicSessionId(session),
@@ -173,8 +175,8 @@ export function createSessionLifecycleHandler(
         currentSha: session.current_sha,
         opencodeSessionId: session.opencode_session_id,
         status: session.status,
-        model: session.model,
-        reasoningEffort: session.reasoning_effort ?? undefined,
+        model,
+        reasoningEffort: reasoningEffort ?? undefined,
         createdAt: session.created_at,
         updatedAt: session.updated_at,
         sandbox: sandbox

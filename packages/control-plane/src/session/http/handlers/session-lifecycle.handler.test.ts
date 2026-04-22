@@ -317,10 +317,12 @@ describe("createSessionLifecycleHandler", () => {
   });
 
   it("maps state response with sandbox details", async () => {
-    const { handler, getSession, getSandbox, getPublicSessionId } = createHandler();
+    const { handler, getSession, getSandbox, getPublicSessionId, validateReasoningEffort } =
+      createHandler();
     getSession.mockReturnValue(createSession());
     getSandbox.mockReturnValue(createSandbox());
     getPublicSessionId.mockReturnValue("public-session-1");
+    validateReasoningEffort.mockReturnValue("high");
 
     const response = handler.getState();
 
@@ -348,6 +350,28 @@ describe("createSessionLifecycleHandler", () => {
         lastHeartbeat: 999,
       },
     });
+  });
+
+  it("sanitizes unsupported models in the state response", async () => {
+    const { handler, getSession, validateReasoningEffort } = createHandler();
+    getSession.mockReturnValue(
+      createSession({
+        model: "openai/gpt-5.4",
+        reasoning_effort: "none",
+      })
+    );
+    validateReasoningEffort.mockReturnValue(null);
+
+    const response = handler.getState();
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toEqual(
+      expect.objectContaining({
+        model: getValidModelOrDefault("openai/gpt-5.4"),
+      })
+    );
+    expect(body).not.toHaveProperty("reasoningEffort");
   });
 
   it("returns 404 when updating title for missing session", async () => {
