@@ -10,6 +10,7 @@
  */
 
 import type { InstallationRepository } from "@open-inspect/shared";
+import { createLogger } from "../logger";
 
 /** Timeout for individual GitHub API requests (ms). */
 export const GITHUB_FETCH_TIMEOUT_MS = 60_000;
@@ -24,6 +25,7 @@ export const INSTALLATION_TOKEN_MIN_REMAINING_MS = 5 * 60 * 1000;
 export const INSTALLATION_TOKEN_CACHE_MAX_TTL_SECONDS = 3600;
 
 const INSTALLATION_TOKEN_CACHE_KEY_PREFIX = "github:installation-token:v1";
+const logger = createLogger("github-app");
 
 interface InstallationTokenCacheBindings {
   REPOS_CACHE?: KVNamespace;
@@ -490,10 +492,41 @@ export async function listInstallationRepositories(
     }
   }
 
+  const roundedTokenGenerationMs = Math.round(tokenGenerationMs * 100) / 100;
+  const sampleRepos = allRepos.slice(0, 5).map((repo) => repo.fullName);
+  const installationContext = {
+    app_id: config.appId,
+    installation_id: config.installationId,
+  };
+
+  logger.info("github.installation_repos.listed", {
+    ...installationContext,
+    repository_selection: first.data.repository_selection,
+    total_count: totalCount,
+    total_pages: totalPages,
+    total_repos: allRepos.length,
+    token_generation_ms: roundedTokenGenerationMs,
+    page_timings: pageTiming,
+    sample_repos: sampleRepos,
+  });
+
+  if (allRepos.length === 0) {
+    logger.warn("github.installation_repos.empty", {
+      ...installationContext,
+      repository_selection: first.data.repository_selection,
+      total_count: totalCount,
+      total_pages: totalPages,
+      diagnosis:
+        first.data.repository_selection === "selected"
+          ? "installation_has_no_selected_repositories_or_wrong_installation_id"
+          : "installation_has_no_accessible_repositories",
+    });
+  }
+
   return {
     repos: allRepos,
     timing: {
-      tokenGenerationMs: Math.round(tokenGenerationMs * 100) / 100,
+      tokenGenerationMs: roundedTokenGenerationMs,
       pages: pageTiming,
       totalPages,
       totalRepos: allRepos.length,
@@ -576,9 +609,11 @@ export async function listRepositoryBranches(
   const token = await getCachedInstallationToken(config, env);
   const branches: { name: string }[] = [];
   let page = 1;
+  const pageTimings: Array<{ page: number; fetchMs: number; branchCount: number }> = [];
 
   // Paginate through branches (100 per page, cap at 500)
   while (branches.length < 500) {
+    const pageStart = performance.now();
     const response = await fetchWithTimeout(
       `https://api.github.com/repos/${owner}/${repo}/branches?per_page=100&page=${page}`,
       {
@@ -598,9 +633,33 @@ export async function listRepositoryBranches(
 
     const data = (await response.json()) as { name: string }[];
     branches.push(...data.map((b) => ({ name: b.name })));
+    pageTimings.push({
+      page,
+      fetchMs: Math.round((performance.now() - pageStart) * 100) / 100,
+      branchCount: data.length,
+    });
 
     if (data.length < 100) break;
     page++;
+  }
+
+  const branchSample = branches.slice(0, 10).map((branch) => branch.name);
+  logger.info("github.repository_branches.listed", {
+    app_id: config.appId,
+    installation_id: config.installationId,
+    repo_owner: owner,
+    repo_name: repo,
+    total_branches: branches.length,
+    page_timings: pageTimings,
+    sample_branches: branchSample,
+  });
+  if (branches.length === 0) {
+    logger.warn("github.repository_branches.empty", {
+      app_id: config.appId,
+      installation_id: config.installationId,
+      repo_owner: owner,
+      repo_name: repo,
+    });
   }
 
   return branches;

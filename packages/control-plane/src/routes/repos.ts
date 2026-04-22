@@ -51,7 +51,13 @@ async function refreshReposCache(env: Env, traceId?: string): Promise<void> {
     logger.info("Repo fetch completed", {
       trace_id: traceId,
       total_repos: repos.length,
+      sample_repos: repos.slice(0, 5).map((repo) => repo.fullName),
     });
+    if (repos.length === 0) {
+      logger.warn("Repo fetch returned no repositories", {
+        trace_id: traceId,
+      });
+    }
   } catch (e) {
     if (e instanceof SourceControlProviderError && e.errorType === "permanent" && !e.httpStatus) {
       logger.warn("SCM provider not configured, skipping repo refresh", {
@@ -136,6 +142,21 @@ async function handleListRepos(
   if (cached) {
     const isFresh = cached.freshUntil && Date.now() < cached.freshUntil;
 
+    logger.info("Serving repos cache", {
+      trace_id: ctx.trace_id,
+      cache_state: isFresh ? "fresh" : "stale",
+      cached_at: cached.cachedAt,
+      repo_count: cached.repos.length,
+      sample_repos: cached.repos.slice(0, 5).map((repo) => repo.fullName),
+    });
+    if (cached.repos.length === 0) {
+      logger.warn("Repos cache returned no repositories", {
+        trace_id: ctx.trace_id,
+        cache_state: isFresh ? "fresh" : "stale",
+        cached_at: cached.cachedAt,
+      });
+    }
+
     if (!isFresh && ctx.executionCtx) {
       // Stale — serve immediately but refresh in background
       logger.info("Serving stale repos cache, refreshing in background", {
@@ -171,7 +192,13 @@ async function handleListRepos(
   logger.info("Repo fetch completed", {
     trace_id: ctx.trace_id,
     total_repos: repos.length,
+    sample_repos: repos.slice(0, 5).map((repo) => repo.fullName),
   });
+  if (repos.length === 0) {
+    logger.warn("Repo fetch returned no repositories", {
+      trace_id: ctx.trace_id,
+    });
+  }
 
   const metadataStore = new RepoMetadataStore(env.DB);
   let metadataMap: Map<string, RepoMetadata>;
@@ -204,6 +231,19 @@ async function handleListRepos(
     );
   } catch (e) {
     logger.warn("Failed to cache repos list", { error: e instanceof Error ? e : String(e) });
+  }
+
+  logger.info("Returning repos response", {
+    trace_id: ctx.trace_id,
+    cached: false,
+    repo_count: enrichedRepos.length,
+    sample_repos: enrichedRepos.slice(0, 5).map((repo) => repo.fullName),
+  });
+  if (enrichedRepos.length === 0) {
+    logger.warn("Repos response contains no repositories", {
+      trace_id: ctx.trace_id,
+      cached: false,
+    });
   }
 
   return json({
@@ -300,7 +340,7 @@ async function handleListBranches(
   _request: Request,
   env: Env,
   match: RegExpMatchArray,
-  _ctx: RequestContext
+  ctx: RequestContext
 ): Promise<Response> {
   const params = extractRepoParams(match);
   if (params instanceof Response) return params;
@@ -309,6 +349,20 @@ async function handleListBranches(
   try {
     const provider = createRouteSourceControlProvider(env);
     const branches = await provider.listBranches({ owner, name });
+    logger.info("Branches fetched", {
+      trace_id: ctx.trace_id,
+      repo_owner: owner,
+      repo_name: name,
+      branch_count: branches.length,
+      sample_branches: branches.slice(0, 10).map((branch) => branch.name),
+    });
+    if (branches.length === 0) {
+      logger.warn("Branch fetch returned no branches", {
+        trace_id: ctx.trace_id,
+        repo_owner: owner,
+        repo_name: name,
+      });
+    }
     return json({ branches });
   } catch (e) {
     if (e instanceof SourceControlProviderError && e.errorType === "permanent" && !e.httpStatus) {
@@ -318,6 +372,7 @@ async function handleListBranches(
       error: e instanceof Error ? e : String(e),
       repo_owner: owner,
       repo_name: name,
+      trace_id: ctx.trace_id,
     });
     return error("Failed to list branches", 500);
   }

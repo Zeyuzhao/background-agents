@@ -47,12 +47,40 @@ export const authOptions: NextAuthOptions = {
       };
 
       const githubProfile = profile as { login?: string };
+      const githubUsername = githubProfile.login?.trim().toLowerCase();
+      const emailDomain = user.email?.split("@")[1]?.trim().toLowerCase();
+      const usernameMatch = githubUsername ? config.allowedUsers.includes(githubUsername) : false;
+      const domainMatch = emailDomain ? config.allowedDomains.includes(emailDomain) : false;
+      const allowAllMode =
+        config.allowedDomains.length === 0 &&
+        config.allowedUsers.length === 0 &&
+        config.unsafeAllowAllUsers;
+
       const isAllowed = checkAccessAllowed(config, {
         githubUsername: githubProfile.login,
         email: user.email ?? undefined,
       });
 
+      console.info("[auth] signIn access check", {
+        githubUsername: githubUsername ?? null,
+        emailDomain: emailDomain ?? null,
+        allowedUsers: config.allowedUsers,
+        allowedDomains: config.allowedDomains,
+        unsafeAllowAllUsers: config.unsafeAllowAllUsers,
+        usernameMatch,
+        domainMatch,
+        allowAllMode,
+        isAllowed,
+      });
+
       if (!isAllowed) {
+        console.warn("[auth] signIn denied", {
+          githubUsername: githubUsername ?? null,
+          emailDomain: emailDomain ?? null,
+          allowedUsers: config.allowedUsers,
+          allowedDomains: config.allowedDomains,
+          unsafeAllowAllUsers: config.unsafeAllowAllUsers,
+        });
         return false;
       }
       return true;
