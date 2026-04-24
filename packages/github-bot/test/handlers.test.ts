@@ -109,7 +109,7 @@ const pullRequestOpenedPayload: PullRequestOpenedPayload = {
     draft: false,
   },
   repository: { owner: { login: "acme" }, name: "widgets", private: false },
-  sender: { login: "alice", id: 1001 },
+  sender: { login: "alice", id: 1001, avatar_url: "https://avatars.githubusercontent.com/u/1001" },
 };
 
 const reviewRequestedPayload: ReviewRequestedPayload = {
@@ -124,7 +124,7 @@ const reviewRequestedPayload: ReviewRequestedPayload = {
   },
   requested_reviewer: { login: "test-bot[bot]" },
   repository: { owner: { login: "acme" }, name: "widgets", private: false },
-  sender: { login: "alice", id: 1001 },
+  sender: { login: "alice", id: 1001, avatar_url: "https://avatars.githubusercontent.com/u/1001" },
 };
 
 const issueCommentPayload: IssueCommentPayload = {
@@ -140,7 +140,7 @@ const issueCommentPayload: IssueCommentPayload = {
     user: { login: "bob" },
   },
   repository: { owner: { login: "acme" }, name: "widgets", private: false },
-  sender: { login: "bob", id: 1002 },
+  sender: { login: "bob", id: 1002, avatar_url: "https://avatars.githubusercontent.com/u/1002" },
 };
 
 const reviewCommentPayload: ReviewCommentPayload = {
@@ -160,7 +160,7 @@ const reviewCommentPayload: ReviewCommentPayload = {
     user: { login: "carol" },
   },
   repository: { owner: { login: "acme" }, name: "widgets", private: false },
-  sender: { login: "carol", id: 1003 },
+  sender: { login: "carol", id: 1003, avatar_url: "https://avatars.githubusercontent.com/u/1003" },
 };
 
 beforeEach(() => {
@@ -199,6 +199,8 @@ describe("handlePullRequestOpened", () => {
     expect(sessionBody.repoName).toBe("widgets");
     expect(sessionBody.title).toContain("Review PR #42");
     expect(sessionBody.scmLogin).toBe("alice");
+    expect(sessionBody.scmUserId).toBe("1001");
+    expect(sessionBody.scmAvatarUrl).toBe("https://avatars.githubusercontent.com/u/1001");
     expect(sessionBody.spawnSource).toBe("github-bot");
 
     const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
@@ -367,6 +369,8 @@ describe("handleReviewRequested", () => {
     expect(sessionBody.repoName).toBe("widgets");
     expect(sessionBody.title).toContain("Review PR #42");
     expect(sessionBody.scmLogin).toBe("alice");
+    expect(sessionBody.scmUserId).toBe("1001");
+    expect(sessionBody.scmAvatarUrl).toBe("https://avatars.githubusercontent.com/u/1001");
     expect(sessionBody.spawnSource).toBe("github-bot");
 
     // Verify prompt sending
@@ -461,6 +465,8 @@ describe("handleIssueComment", () => {
 
     const sessionBody = JSON.parse(cpFetch.mock.calls[0][1].body);
     expect(sessionBody.scmLogin).toBe("bob");
+    expect(sessionBody.scmUserId).toBe("1002");
+    expect(sessionBody.scmAvatarUrl).toBe("https://avatars.githubusercontent.com/u/1002");
     expect(sessionBody.spawnSource).toBe("github-bot");
 
     const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
@@ -503,7 +509,11 @@ describe("handleIssueComment", () => {
     const log = createMockLogger();
     const payload: IssueCommentPayload = {
       ...issueCommentPayload,
-      sender: { login: "test-bot[bot]", id: 2001 },
+      sender: {
+        login: "test-bot[bot]",
+        id: 2001,
+        avatar_url: "https://avatars.githubusercontent.com/u/2001",
+      },
     };
 
     const result = await handleIssueComment(env, log, payload, "trace-2");
@@ -552,6 +562,8 @@ describe("handleReviewComment", () => {
 
     const sessionBody = JSON.parse(cpFetch.mock.calls[0][1].body);
     expect(sessionBody.scmLogin).toBe("carol");
+    expect(sessionBody.scmUserId).toBe("1003");
+    expect(sessionBody.scmAvatarUrl).toBe("https://avatars.githubusercontent.com/u/1003");
     expect(sessionBody.spawnSource).toBe("github-bot");
 
     const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
@@ -580,7 +592,11 @@ describe("handleReviewComment", () => {
     const log = createMockLogger();
     const payload: ReviewCommentPayload = {
       ...reviewCommentPayload,
-      sender: { login: "test-bot[bot]", id: 2001 },
+      sender: {
+        login: "test-bot[bot]",
+        id: 2001,
+        avatar_url: "https://avatars.githubusercontent.com/u/2001",
+      },
     };
 
     const result = await handleReviewComment(env, log, payload, "trace-3");
