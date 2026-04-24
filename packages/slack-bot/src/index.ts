@@ -971,6 +971,20 @@ async function postSessionStartedMessage(
   );
 }
 
+function logSlackPayloadReceived(
+  traceId: string,
+  httpPath: "/events" | "/interactions",
+  payload: Record<string, unknown>,
+  extra: Record<string, unknown> = {}
+): void {
+  log.info("slack.payload.received", {
+    trace_id: traceId,
+    http_path: httpPath,
+    payload,
+    ...extra,
+  });
+}
+
 const app = new Hono<{ Bindings: Env }>();
 
 // Health check
@@ -1021,6 +1035,12 @@ app.post("/events", async (c) => {
   }
 
   const payload = JSON.parse(body);
+  logSlackPayloadReceived(traceId, "/events", payload, {
+    payload_type: payload.type,
+    event_id: payload.event_id,
+    event_type: payload.event?.type,
+    payload_size_bytes: body.length,
+  });
 
   // Handle URL verification challenge
   if (payload.type === "url_verification") {
@@ -1088,6 +1108,19 @@ app.post("/interactions", async (c) => {
 
   const payloadStr = new URLSearchParams(body).get("payload") || "{}";
   const payload = JSON.parse(payloadStr) as SlackInteractionPayload;
+  const actionId = payload.actions?.[0]?.action_id ?? payload.action_id;
+
+  logSlackPayloadReceived(traceId, "/interactions", payload as Record<string, unknown>, {
+    payload_type: payload.type,
+    interaction_type: payload.type,
+    action_id: actionId,
+    callback_id: payload.view?.callback_id,
+    user_id: payload.user?.id,
+    channel_id: payload.channel?.id,
+    message_ts: payload.message?.ts,
+    thread_ts: payload.message?.thread_ts,
+    payload_size_bytes: payloadStr.length,
+  });
 
   if (payload.type === "block_suggestion") {
     const suggestionActionId = payload.action_id;
@@ -1145,7 +1178,6 @@ app.post("/interactions", async (c) => {
     });
   }
 
-  const actionId = payload.actions?.[0]?.action_id ?? payload.action_id;
   const isViewSubmission = payload.type === "view_submission";
   const shouldOpenModalInline =
     actionId === "open_branch_modal" || actionId === REPO_BRANCH_SELECTOR_ACTION_ID;

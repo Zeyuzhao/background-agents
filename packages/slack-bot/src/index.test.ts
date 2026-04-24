@@ -117,6 +117,128 @@ async function flushWaitUntil(ctx: ReturnType<typeof makeCtx>, callIndex = 0): P
   await ctx.waitUntil.mock.calls[callIndex]?.[0];
 }
 
+function getStructuredLogs(logSpy: ReturnType<typeof vi.spyOn>): Array<Record<string, unknown>> {
+  return logSpy.mock.calls.flatMap((call) => {
+    const [line] = call;
+    if (typeof line !== "string") {
+      return [];
+    }
+
+    try {
+      return [JSON.parse(line) as Record<string, unknown>];
+    } catch {
+      return [];
+    }
+  });
+}
+
+describe("Slack request payload logging", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearLocalCache();
+    mockVerifySlackSignature.mockResolvedValue(true);
+    mockOpenView.mockResolvedValue({ ok: true });
+  });
+
+  it("logs the full /events payload after signature verification", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    try {
+      const payload = {
+        type: "url_verification",
+        challenge: "challenge-token",
+        token: "verification-token",
+      };
+
+      const request = new Request("http://localhost/events", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-slack-signature": "v0=test",
+          "x-slack-request-timestamp": `${Math.floor(Date.now() / 1000)}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const env = makeEnv();
+      const ctx = makeCtx();
+      const response = await app.fetch(request, env, ctx);
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ challenge: "challenge-token" });
+
+      const payloadLog = getStructuredLogs(logSpy).find(
+        (entry) => entry.msg === "slack.payload.received" && entry.http_path === "/events"
+      );
+
+      expect(payloadLog).toEqual(
+        expect.objectContaining({
+          level: "info",
+          service: "slack-bot",
+          component: "handler",
+          msg: "slack.payload.received",
+          http_path: "/events",
+          payload,
+          trace_id: expect.any(String),
+        })
+      );
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("logs the full /interactions payload after signature verification", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    try {
+      const payload = {
+        type: "block_actions",
+        user: { id: "U123" },
+        channel: { id: "C123" },
+        message: { ts: "111.222", thread_ts: "111.222" },
+        actions: [{ action_id: "view_session" }],
+      };
+
+      const request = new Request("http://localhost/interactions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "x-slack-signature": "v0=test",
+          "x-slack-request-timestamp": `${Math.floor(Date.now() / 1000)}`,
+        },
+        body: new URLSearchParams({ payload: JSON.stringify(payload) }),
+      });
+
+      const env = makeEnv();
+      const ctx = makeCtx();
+      const response = await app.fetch(request, env, ctx);
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ ok: true });
+
+      const payloadLog = getStructuredLogs(logSpy).find(
+        (entry) => entry.msg === "slack.payload.received" && entry.http_path === "/interactions"
+      );
+
+      expect(payloadLog).toEqual(
+        expect.objectContaining({
+          level: "info",
+          service: "slack-bot",
+          component: "handler",
+          msg: "slack.payload.received",
+          http_path: "/interactions",
+          interaction_type: "block_actions",
+          action_id: "view_session",
+          payload,
+          trace_id: expect.any(String),
+        })
+      );
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+});
+
 describe("POST /interactions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
