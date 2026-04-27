@@ -10,6 +10,9 @@
  */
 
 import type { InstallationRepository } from "@open-inspect/shared";
+import { createLogger } from "../logger";
+
+const log = createLogger("github-app");
 
 /** Timeout for individual GitHub API requests (ms). */
 export const GITHUB_FETCH_TIMEOUT_MS = 60_000;
@@ -231,6 +234,10 @@ async function getInstallationTokenWithMetadata(
 
   if (!response.ok) {
     const error = await response.text();
+    log.error("github.token.exchange_failed", {
+      installation_id: installationId,
+      http_status: response.status,
+    });
     throw new Error(`Failed to get installation token: ${response.status} ${error}`);
   }
 
@@ -260,7 +267,11 @@ async function readInstallationTokenFromKv(
   try {
     const cached = await env.REPOS_CACHE.get<CachedInstallationToken>(cacheKey, "json");
     return cached ?? null;
-  } catch {
+  } catch (e) {
+    log.warn("github.token.kv_read_failed", {
+      cache_key: cacheKey,
+      error: e instanceof Error ? e : new Error(String(e)),
+    });
     return null;
   }
 }
@@ -288,8 +299,12 @@ async function writeInstallationTokenToKv(
 
   try {
     await env.REPOS_CACHE.put(cacheKey, JSON.stringify(cached), { expirationTtl: ttlSeconds });
-  } catch {
-    // Cache failures are non-fatal.
+  } catch (e) {
+    log.warn("github.token.kv_write_failed", {
+      cache_key: cacheKey,
+      ttl_seconds: ttlSeconds,
+      error: e instanceof Error ? e : new Error(String(e)),
+    });
   }
 }
 
@@ -306,8 +321,11 @@ async function invalidateInstallationTokenCache(
 
   try {
     await env.REPOS_CACHE.delete(cacheKey);
-  } catch {
-    // Cache invalidation failures are non-fatal.
+  } catch (e) {
+    log.warn("github.token.kv_invalidate_failed", {
+      cache_key: cacheKey,
+      error: e instanceof Error ? e : new Error(String(e)),
+    });
   }
 }
 
@@ -317,8 +335,21 @@ async function refreshInstallationToken(
   cacheKey: string
 ): Promise<CachedInstallationToken> {
   const nowEpochMs = Date.now();
+  const jwtStart = performance.now();
   const jwt = await generateAppJwt(config.appId, config.privateKey);
+  const jwtDurationMs = Math.round((performance.now() - jwtStart) * 100) / 100;
+
+  const exchangeStart = performance.now();
   const tokenData = await getInstallationTokenWithMetadata(jwt, config.installationId);
+  const exchangeDurationMs = Math.round((performance.now() - exchangeStart) * 100) / 100;
+
+  log.info("github.token.exchange", {
+    installation_id: config.installationId,
+    jwt_generation_ms: jwtDurationMs,
+    token_exchange_ms: exchangeDurationMs,
+    expires_at: tokenData.expires_at,
+  });
+
   const parsedExpiresAtEpochMs = Date.parse(tokenData.expires_at);
   const cached: CachedInstallationToken = {
     token: tokenData.token,
@@ -343,25 +374,50 @@ export async function getCachedInstallationToken(
 ): Promise<string> {
   const cacheKey = getInstallationTokenCacheKey(config);
   const forceRefresh = options?.forceRefresh ?? false;
+  const startMs = performance.now();
+  const installationId = config.installationId;
 
   if (!forceRefresh) {
     const memoryCached = installationTokenMemoryCache.get(cacheKey);
     if (memoryCached && isTokenUsable(memoryCached)) {
+      const remainingMs = memoryCached.expiresAtEpochMs - Date.now();
+      log.debug("github.token.cache_hit", {
+        installation_id: installationId,
+        cache_source: "memory",
+        remaining_lifetime_ms: remainingMs,
+        duration_ms: Math.round((performance.now() - startMs) * 100) / 100,
+      });
       return memoryCached.token;
     }
 
     const kvCached = await readInstallationTokenFromKv(env, cacheKey);
     if (kvCached && isTokenUsable(kvCached)) {
       installationTokenMemoryCache.set(cacheKey, kvCached);
+      const remainingMs = kvCached.expiresAtEpochMs - Date.now();
+      log.debug("github.token.cache_hit", {
+        installation_id: installationId,
+        cache_source: "kv",
+        remaining_lifetime_ms: remainingMs,
+        duration_ms: Math.round((performance.now() - startMs) * 100) / 100,
+      });
       return kvCached.token;
     }
 
     const inFlight = installationTokenRefreshInFlight.get(cacheKey);
     if (inFlight) {
+      log.debug("github.token.cache_hit", {
+        installation_id: installationId,
+        cache_source: "in_flight",
+      });
       const shared = await inFlight;
       return shared.token;
     }
   }
+
+  log.info("github.token.refresh", {
+    installation_id: installationId,
+    reason: forceRefresh ? "force_refresh" : "cache_miss",
+  });
 
   const refreshPromise = refreshInstallationToken(config, env, cacheKey).finally(() => {
     installationTokenRefreshInFlight.delete(cacheKey);
@@ -369,6 +425,11 @@ export async function getCachedInstallationToken(
   installationTokenRefreshInFlight.set(cacheKey, refreshPromise);
 
   const refreshed = await refreshPromise;
+  log.info("github.token.refreshed", {
+    installation_id: installationId,
+    expires_at_epoch_ms: refreshed.expiresAtEpochMs,
+    duration_ms: Math.round((performance.now() - startMs) * 100) / 100,
+  });
   return refreshed.token;
 }
 
@@ -466,6 +527,11 @@ export async function listInstallationRepositories(
       throw error;
     }
 
+    log.warn("github.token.expired", {
+      installation_id: config.installationId,
+      operation: "list_repos",
+      http_status: 401,
+    });
     await invalidateInstallationTokenCache(env, getInstallationTokenCacheKey(config));
     token = await getCachedInstallationToken(config, env, { forceRefresh: true });
     headers.Authorization = `Bearer ${token}`;
@@ -490,15 +556,22 @@ export async function listInstallationRepositories(
     }
   }
 
-  return {
-    repos: allRepos,
-    timing: {
-      tokenGenerationMs: Math.round(tokenGenerationMs * 100) / 100,
-      pages: pageTiming,
-      totalPages,
-      totalRepos: allRepos.length,
-    },
+  const timing: ListReposTiming = {
+    tokenGenerationMs: Math.round(tokenGenerationMs * 100) / 100,
+    pages: pageTiming,
+    totalPages,
+    totalRepos: allRepos.length,
   };
+
+  log.info("github.list_repos.completed", {
+    installation_id: config.installationId,
+    total_repos: timing.totalRepos,
+    total_pages: timing.totalPages,
+    token_generation_ms: timing.tokenGenerationMs,
+    total_fetch_ms: Math.round(pageTiming.reduce((sum, p) => sum + p.fetchMs, 0) * 100) / 100,
+  });
+
+  return { repos: allRepos, timing };
 }
 
 /**
@@ -512,8 +585,10 @@ export async function getInstallationRepository(
   env?: InstallationTokenCacheBindings
 ): Promise<InstallationRepository | null> {
   const cacheKey = getInstallationTokenCacheKey(config);
+  const startMs = performance.now();
   let forceRefresh = false;
   let response!: Response;
+  let retried = false;
 
   for (let attempt = 0; attempt < 2; attempt++) {
     const token = await getCachedInstallationToken(config, env, { forceRefresh });
@@ -530,16 +605,38 @@ export async function getInstallationRepository(
       break;
     }
 
+    log.warn("github.token.expired", {
+      installation_id: config.installationId,
+      operation: "get_repo",
+      repo: `${owner}/${repo}`,
+      http_status: 401,
+    });
     await invalidateInstallationTokenCache(env, cacheKey);
     forceRefresh = true;
+    retried = true;
   }
 
+  const durationMs = Math.round((performance.now() - startMs) * 100) / 100;
+
   if (response.status === 404 || response.status === 403) {
+    log.debug("github.get_repo.not_accessible", {
+      installation_id: config.installationId,
+      repo: `${owner}/${repo}`,
+      http_status: response.status,
+      duration_ms: durationMs,
+    });
     return null;
   }
 
   if (!response.ok) {
     const error = await response.text();
+    log.error("github.get_repo.failed", {
+      installation_id: config.installationId,
+      repo: `${owner}/${repo}`,
+      http_status: response.status,
+      retried,
+      duration_ms: durationMs,
+    });
     throw new Error(`Failed to fetch repository: ${response.status} ${error}`);
   }
 
@@ -552,6 +649,13 @@ export async function getInstallationRepository(
     default_branch: string;
     owner: { login: string };
   };
+
+  log.debug("github.get_repo.completed", {
+    installation_id: config.installationId,
+    repo: `${owner}/${repo}`,
+    retried,
+    duration_ms: durationMs,
+  });
 
   return {
     id: data.id,
@@ -573,6 +677,7 @@ export async function listRepositoryBranches(
   repo: string,
   env?: InstallationTokenCacheBindings
 ): Promise<{ name: string }[]> {
+  const startMs = performance.now();
   const token = await getCachedInstallationToken(config, env);
   const branches: { name: string }[] = [];
   let page = 1;
@@ -593,6 +698,13 @@ export async function listRepositoryBranches(
 
     if (!response.ok) {
       const error = await response.text();
+      log.error("github.list_branches.failed", {
+        installation_id: config.installationId,
+        repo: `${owner}/${repo}`,
+        http_status: response.status,
+        page,
+        duration_ms: Math.round((performance.now() - startMs) * 100) / 100,
+      });
       throw new Error(`Failed to list branches: ${response.status} ${error}`);
     }
 
@@ -602,6 +714,14 @@ export async function listRepositoryBranches(
     if (data.length < 100) break;
     page++;
   }
+
+  log.debug("github.list_branches.completed", {
+    installation_id: config.installationId,
+    repo: `${owner}/${repo}`,
+    branch_count: branches.length,
+    pages_fetched: page,
+    duration_ms: Math.round((performance.now() - startMs) * 100) / 100,
+  });
 
   return branches;
 }
