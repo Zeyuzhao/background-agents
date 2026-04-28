@@ -454,4 +454,5 @@ See [Secrets Management](./SECRETS.md) for setup instructions.
 ## What's Next
 
 - **[Getting Started](./GETTING_STARTED.md)**: Deploy your own instance
+- **[System Diagrams](./SYSTEM_DIAGRAMS.md)**: Service boundaries, interfaces, and state machines
 - **[Debugging Playbook](./DEBUGGING_PLAYBOOK.md)**: Troubleshoot issues with structured logs
