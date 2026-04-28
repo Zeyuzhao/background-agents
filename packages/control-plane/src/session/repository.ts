@@ -420,6 +420,12 @@ export class SessionRepository {
     );
   }
 
+  clearSandboxConnectionAuth(): void {
+    this.sql.exec(
+      `UPDATE sandbox SET auth_token = NULL, auth_token_hash = NULL WHERE id = (SELECT id FROM sandbox LIMIT 1)`
+    );
+  }
+
   clearSandboxCodeServerUrl(): void {
     this.sql.exec(
       `UPDATE sandbox SET code_server_url = NULL WHERE id = (SELECT id FROM sandbox LIMIT 1)`

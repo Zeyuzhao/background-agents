@@ -96,6 +96,8 @@ export interface SandboxStorage {
   updateSandboxCodeServer(url: string, password: string): void | Promise<void>;
   /** Clear stale code-server URL and password (e.g. on sandbox teardown) */
   clearSandboxCodeServer(): void;
+  /** Invalidate sandbox connection credentials for the current logical sandbox */
+  clearSandboxConnectionAuth?(): void;
   /** Clear the code-server URL while preserving the stored password */
   clearSandboxCodeServerUrl?(): void;
   /** Update tunnel URLs for extra ports on the sandbox row */
@@ -914,6 +916,7 @@ export class SandboxLifecycleManager {
       });
       await this.callbacks.onSandboxTerminating?.();
       this.storage.updateSandboxStatus("failed");
+      this.storage.clearSandboxConnectionAuth?.();
       this.clearSandboxAccessState();
       if (this.usesProviderManagedStop()) {
         try {
