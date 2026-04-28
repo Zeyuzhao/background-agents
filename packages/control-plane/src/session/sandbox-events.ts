@@ -190,6 +190,7 @@ export class SessionSandboxEventProcessor {
           message_id: completionMessageId,
           outcome: event.success ? "success" : "failure",
           message_status: status,
+          error: event.error,
           total_duration_ms: totalDurationMs,
           processing_duration_ms: processingDurationMs,
           queue_duration_ms: queueDurationMs,
