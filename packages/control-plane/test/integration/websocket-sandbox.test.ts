@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import { runInDurableObject } from "cloudflare:test";
+import type { SessionDO } from "../../src/session/durable-object";
 import { initNamedSession, openSandboxWs, seedSandboxAuth, queryDO } from "./helpers";
 
 const SANDBOX_TOKEN = "test-sandbox-auth-token-abc123";
@@ -63,6 +65,46 @@ describe("Sandbox WebSocket (via SELF.fetch)", () => {
     });
 
     expect(response.status).toBe(410);
+    expect(ws).toBeNull();
+  });
+
+  it("rejects late sandbox upgrade after connecting timeout invalidates auth", async () => {
+    const name = `ws-sandbox-connecting-timeout-${Date.now()}`;
+    const { stub } = await initNamedSession(name);
+
+    // Wait for init's fire-and-forget warmSandbox to settle before forcing
+    // a synthetic connecting timeout state.
+    for (let i = 0; i < 30; i++) {
+      const rows = await queryDO<{ status: string }>(stub, "SELECT status FROM sandbox");
+      if (rows[0]?.status === "failed") break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+
+    await seedSandboxAuth(stub, { authToken: SANDBOX_TOKEN, sandboxId: SANDBOX_ID });
+    await queryDO(
+      stub,
+      "UPDATE sandbox SET status = ?, created_at = ? WHERE id = (SELECT id FROM sandbox LIMIT 1)",
+      "connecting",
+      Date.now() - 130_000
+    );
+
+    await runInDurableObject(stub, (instance: SessionDO) => instance.alarm());
+
+    const sandboxRows = await queryDO<{
+      status: string;
+      auth_token: string | null;
+      auth_token_hash: string | null;
+    }>(stub, "SELECT status, auth_token, auth_token_hash FROM sandbox");
+    expect(sandboxRows[0]?.status).toBe("failed");
+    expect(sandboxRows[0]?.auth_token).toBeNull();
+    expect(sandboxRows[0]?.auth_token_hash).toBeNull();
+
+    const { ws, response } = await openSandboxWs(name, {
+      authToken: SANDBOX_TOKEN,
+      sandboxId: SANDBOX_ID,
+    });
+
+    expect(response.status).toBe(401);
     expect(ws).toBeNull();
   });
 

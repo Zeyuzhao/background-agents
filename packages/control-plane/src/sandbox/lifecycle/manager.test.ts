@@ -176,6 +176,13 @@ function createMockStorage(
         sandbox.code_server_password = null;
       }
     }),
+    clearSandboxConnectionAuth: vi.fn(() => {
+      calls.push("clearSandboxConnectionAuth");
+      if (sandbox) {
+        sandbox.auth_token = null;
+        sandbox.auth_token_hash = null;
+      }
+    }),
     updateSandboxTunnelUrls: vi.fn(async (urls: Record<string, string>) => {
       calls.push(`updateSandboxTunnelUrls`);
       if (sandbox) {
@@ -1056,6 +1063,7 @@ describe("SandboxLifecycleManager", () => {
       await manager.handleAlarm();
 
       expect(storage.calls).toContain("updateSandboxStatus:failed");
+      expect(storage.calls).toContain("clearSandboxConnectionAuth");
       expect(storage.calls).toContain("clearSandboxCodeServer");
       expect(broadcaster.messages.some((m) => (m as { status?: string }).status === "failed")).toBe(
         true

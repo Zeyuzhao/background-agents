@@ -636,6 +636,7 @@ export class SessionDO extends DurableObject<Env> {
         this.repository.updateSandboxCodeServer(url, encrypted);
       },
       clearSandboxCodeServer: () => this.repository.clearSandboxCodeServer(),
+      clearSandboxConnectionAuth: () => this.repository.clearSandboxConnectionAuth(),
       clearSandboxCodeServerUrl: () => this.repository.clearSandboxCodeServerUrl(),
       updateSandboxTunnelUrls: (urls) => this.repository.updateSandboxTunnelUrls(urls),
       clearSandboxTunnelUrls: () => this.repository.clearSandboxTunnelUrls(),
