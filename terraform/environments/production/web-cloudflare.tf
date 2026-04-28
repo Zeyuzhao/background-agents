@@ -63,6 +63,13 @@ resource "local_file" "web_app_wrangler_production" {
     compatibility_date = "2025-08-15"
     compatibility_flags = ["nodejs_compat", "global_fetch_strictly_public"]
 
+    [observability]
+    enabled = true
+
+    [observability.logs]
+    enabled = true
+    invocation_logs = true
+
     [vars]
     GITHUB_CLIENT_ID = "${var.github_client_id}"
     NEXTAUTH_URL = "${local.web_app_url}"
